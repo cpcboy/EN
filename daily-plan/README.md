@@ -100,13 +100,17 @@ sudo systemctl restart daily-plan
 
 ```bash
 curl -fsSL http://你的服务器IP:3000/quota-reporter.py -o ~/.quota-reporter.py
-(crontab -l 2>/dev/null | grep -v quota-reporter; echo "* * * * * /usr/bin/python3 $HOME/.quota-reporter.py http://你的服务器IP:3000 >/dev/null 2>&1") | crontab -
-python3 ~/.quota-reporter.py http://你的服务器IP:3000   # 立即上报一次并查看结果
+python3 ~/.quota-reporter.py --install http://你的服务器IP:3000
 ```
+
+`--install` 会注册一个每分钟运行的 **LaunchAgent**（macOS 必须用它而不是 cron：
+cron 在用户登录会话之外运行，读不到钥匙串里的 Claude Code 凭证），
+并自动清理旧的 crontab 方式。运行日志在 `/tmp/quota-reporter.log`。
 
 前提：Mac 上登录过 Claude Code；Codex 至少跑过一次任务（额度取自其最近会话记录）。
 设置了访问口令的话，命令末尾追加口令参数：`… http://IP:3000 你的口令`。
 Mac 关机/睡眠期间不上报，页面会显示「未在更新」，开机后自动恢复。
+排查网络问题可运行：`python3 ~/.quota-reporter.py --debug`。
 
 ## 数据备份
 

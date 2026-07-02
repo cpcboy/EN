@@ -24,8 +24,10 @@ import urllib.request
 
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]
 DEBUG_MODE = '--debug' in sys.argv
+INSTALL_MODE = '--install' in sys.argv
 SERVER = (_args[0] if _args else os.environ.get('DP_SERVER', '')).rstrip('/')
 ACCESS_CODE = _args[1] if len(_args) > 1 else os.environ.get('DP_ACCESS_CODE', '')
+AGENT_LABEL = 'com.dailyplan.quota-reporter'
 CLAUDE_CRED = os.environ.get('CLAUDE_CRED_FILE', os.path.expanduser('~/.claude/.credentials.json'))
 CLAUDE_USAGE_URL = os.environ.get('CLAUDE_USAGE_URL', 'https://api.anthropic.com/api/oauth/usage')
 CODEX_SESSIONS = os.environ.get('CODEX_SESSIONS_DIR', os.path.expanduser('~/.codex/sessions'))
@@ -342,9 +344,48 @@ def debug_network():
             print('  %s -> 失败：%s %s' % (u, type(e).__name__, getattr(e, 'reason', e)))
 
 
+def install_launch_agent():
+    """安装为 macOS LaunchAgent，每分钟运行一次。
+    必须用 LaunchAgent 而不是 cron：cron 运行在用户登录会话之外，
+    读不到钥匙串里的 Claude Code 凭证。"""
+    if sys.platform != 'darwin':
+        sys.exit('--install 仅支持 macOS（Linux 请继续用 crontab）')
+    if not SERVER:
+        sys.exit('用法：python3 quota-reporter.py --install http://服务器IP:3000 [访问口令]')
+    import plistlib
+    script = os.path.abspath(__file__)
+    plist_path = os.path.expanduser('~/Library/LaunchAgents/%s.plist' % AGENT_LABEL)
+    args = ['/usr/bin/python3', script, SERVER] + ([ACCESS_CODE] if ACCESS_CODE else [])
+    os.makedirs(os.path.dirname(plist_path), exist_ok=True)
+    with open(plist_path, 'wb') as f:
+        plistlib.dump({
+            'Label': AGENT_LABEL,
+            'ProgramArguments': args,
+            'StartInterval': 60,
+            'RunAtLoad': True,
+            'StandardOutPath': '/tmp/quota-reporter.log',
+            'StandardErrorPath': '/tmp/quota-reporter.log',
+        }, f)
+    subprocess.run(['launchctl', 'unload', plist_path], capture_output=True)
+    r = subprocess.run(['launchctl', 'load', plist_path], capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit('launchctl load 失败：' + (r.stderr or r.stdout))
+    # 移除旧的 crontab 方式，避免重复上报
+    cr = subprocess.run(['crontab', '-l'], capture_output=True, text=True)
+    if cr.returncode == 0 and 'quota-reporter' in cr.stdout:
+        kept = '\n'.join(l for l in cr.stdout.splitlines() if 'quota-reporter' not in l)
+        subprocess.run(['crontab', '-'], input=kept + '\n', text=True)
+        print('已移除旧的 crontab 定时任务')
+    print('✅ 已安装 LaunchAgent（%s），每分钟自动上报一次' % AGENT_LABEL)
+    print('   运行日志：/tmp/quota-reporter.log')
+    print('   卸载方法：launchctl unload %s && rm %s' % (plist_path, plist_path))
+
+
 def main():
     if DEBUG_MODE:
         return debug_network()
+    if INSTALL_MODE:
+        return install_launch_agent()
     if not SERVER:
         sys.exit('用法：python3 quota-reporter.py http://服务器IP:3000 [访问口令]')
     headers = {'Content-Type': 'application/json'}
