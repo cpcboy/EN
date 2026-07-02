@@ -95,13 +95,6 @@ button { cursor: pointer; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.clock-sec {
-  font-size: .34em;
-  font-weight: 400;
-  color: var(--faint);
-  margin-left: .18em;
-  letter-spacing: .08em;
-}
 .clock-date {
   margin-top: 8px;
   font-size: 15px;

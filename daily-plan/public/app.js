@@ -5,7 +5,7 @@
 
 const $ = (id) => document.getElementById(id);
 const els = {
-  clockHM: $('clockHM'), clockS: $('clockS'), clockDate: $('clockDate'),
+  clockHM: $('clockHM'), clockDate: $('clockDate'),
   progressNum: $('progressNum'), progressFill: $('progressFill'),
   progressRocket: $('progressRocket'), progressNote: $('progressNote'),
   syncStatus: $('syncStatus'),
@@ -70,10 +70,8 @@ function api(path, opts = {}) {
 }
 
 function setSync(kind) {
-  const t = new Date();
-  const hhmmss = `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
   els.syncStatus.textContent = {
-    ok: `SYNCED ${hhmmss} · 已同步`,
+    ok: 'SYNCED · 已同步',
     saving: 'SAVING · 保存中…',
     offline: 'OFFLINE · 离线，改动将自动重试',
     code: 'ACCESS CODE REQUIRED · 请输入口令',
@@ -312,7 +310,6 @@ function loadDate(date) {
 function tickClock() {
   const now = new Date();
   els.clockHM.textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-  els.clockS.textContent = pad(now.getSeconds());
   els.clockDate.textContent =
     `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} · ${WEEK[now.getDay()]}`;
 
