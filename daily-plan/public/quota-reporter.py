@@ -22,8 +22,10 @@ import subprocess
 import sys
 import urllib.request
 
-SERVER = (sys.argv[1] if len(sys.argv) > 1 else os.environ.get('DP_SERVER', '')).rstrip('/')
-ACCESS_CODE = sys.argv[2] if len(sys.argv) > 2 else os.environ.get('DP_ACCESS_CODE', '')
+_args = [a for a in sys.argv[1:] if not a.startswith('--')]
+DEBUG_MODE = '--debug' in sys.argv
+SERVER = (_args[0] if _args else os.environ.get('DP_SERVER', '')).rstrip('/')
+ACCESS_CODE = _args[1] if len(_args) > 1 else os.environ.get('DP_ACCESS_CODE', '')
 CLAUDE_CRED = os.environ.get('CLAUDE_CRED_FILE', os.path.expanduser('~/.claude/.credentials.json'))
 CLAUDE_USAGE_URL = os.environ.get('CLAUDE_USAGE_URL', 'https://api.anthropic.com/api/oauth/usage')
 CODEX_SESSIONS = os.environ.get('CODEX_SESSIONS_DIR', os.path.expanduser('~/.codex/sessions'))
@@ -269,7 +271,50 @@ def merge_previous(tools, headers):
     return merged
 
 
+def debug_network():
+    """网络诊断：python3 quota-reporter.py --debug，把输出发给维护者定位问题。"""
+    import socket
+    print('== 系统 DNS 服务器 ==')
+    if sys.platform == 'darwin':
+        try:
+            out = subprocess.run(['scutil', '--dns'], capture_output=True, text=True, timeout=5).stdout
+            servers = sorted(set(re.findall(r'nameserver\[\d+\] : (\S+)', out)))
+            print('  ' + (', '.join(servers) if servers else '(未识别)'))
+        except Exception as e:
+            print('  读取失败:', type(e).__name__)
+    print('== 系统代理配置 ==')
+    print('  getproxies:', urllib.request.getproxies() or '(无)')
+    for host in ('api.anthropic.com', 'claude.ai', 'chatgpt.com', 'api.openai.com'):
+        print('== %s ==' % host)
+        try:
+            infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+            ips = sorted(set(ai[4][0] for ai in infos))
+        except Exception as e:
+            print('  DNS 解析失败:', type(e).__name__, e)
+            continue
+        for ip in ips[:4]:
+            try:
+                s = socket.create_connection((ip, 443), timeout=5)
+                s.close()
+                result = 'TCP 443 可连接'
+            except Exception as e:
+                result = 'TCP 443 连不上（%s）' % type(e).__name__
+            print('  %s  %s' % (ip.ljust(39), result))
+    print('== 直连 HTTPS 测试（收到任何 HTTP 状态码都代表网络通） ==')
+    for u in ('https://api.anthropic.com/api/oauth/usage', 'https://chatgpt.com/'):
+        try:
+            req = urllib.request.Request(u, headers={'User-Agent': 'daily-plan-debug/1.0'})
+            with open_url(req, 12, 'DIRECT') as resp:
+                print('  %s -> HTTP %s（通）' % (u, resp.status))
+        except urllib.error.HTTPError as e:
+            print('  %s -> HTTP %s（通）' % (u, e.code))
+        except Exception as e:
+            print('  %s -> 失败：%s %s' % (u, type(e).__name__, getattr(e, 'reason', e)))
+
+
 def main():
+    if DEBUG_MODE:
+        return debug_network()
     if not SERVER:
         sys.exit('用法：python3 quota-reporter.py http://服务器IP:3000 [访问口令]')
     headers = {'Content-Type': 'application/json'}
