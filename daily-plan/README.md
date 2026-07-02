@@ -1,0 +1,90 @@
+# 每日工作计划 · Daily Mission Plan
+
+SpaceX 风格（白底黑字、宇宙与火箭线稿插画）的每日任务面板：
+
+- **iPad 横放在桌面常显**：大字时钟 + 今日任务 + 完成进度，页面每 5 秒自动同步，跨天自动翻页
+- **iPhone / Mac 随时查看和编辑**：打开同一个网址即可增删改任务，改动几秒内出现在 iPad 上
+- **零依赖**：服务端只需要 Node.js，一个文件跑起来，数据存在 `data/tasks.json`
+- 支持：任务时间、重点标记（▲）、排序、昨日未完成一键移到今天、按日期翻页提前规划
+
+## 目录结构
+
+```
+daily-plan/
+├── server.js            # 服务端（Node.js，无任何第三方依赖）
+├── daily-plan.service   # systemd 开机自启配置
+├── public/              # 前端页面
+└── data/tasks.json      # 任务数据（运行后自动生成）
+```
+
+## 本地试运行
+
+```bash
+cd daily-plan
+node server.js          # 打开 http://localhost:3000
+```
+
+## 部署到阿里云服务器
+
+以下命令在服务器上执行（Ubuntu / Debian 为例，CentOS 把 `apt` 换成 `yum`）：
+
+```bash
+# 1. 安装 Node.js（已安装可跳过，node -v 显示 v16 以上即可）
+sudo apt update && sudo apt install -y nodejs
+
+# 2. 上传代码到 /opt/daily-plan（本机执行，把 IP 换成你的服务器）
+scp -r daily-plan root@你的服务器IP:/opt/
+
+# 3. 设置开机自启并启动（服务器上执行）
+cd /opt/daily-plan
+sudo cp daily-plan.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now daily-plan
+systemctl status daily-plan     # 看到 active (running) 即成功
+```
+
+**最后一步：开放端口。** 在阿里云控制台 → ECS → 安全组 → 入方向规则，放行 TCP **3000** 端口（授权对象 `0.0.0.0/0`）。
+
+然后在任何设备的浏览器打开：`http://你的服务器IP:3000`
+
+> 也可以用 git 方式部署：在服务器上 `git clone` 本仓库，然后把
+> `daily-plan.service` 里的 `WorkingDirectory` 改成实际路径。
+
+### 更新版本
+
+```bash
+scp -r daily-plan root@你的服务器IP:/opt/    # 重新上传（data/ 不会被覆盖删除）
+sudo systemctl restart daily-plan
+```
+
+## iPad 桌面常显设置（重要）
+
+1. 用 **Safari** 打开 `http://你的服务器IP:3000`
+2. 点分享按钮 → **添加到主屏幕**，从主屏幕图标打开 → 全屏无地址栏，像一个 App
+3. 设置 → 显示与亮度 → **自动锁定 → 永不**（iPad 一直插电摆在桌面）
+4. 可选：设置 → 辅助功能 → **引导式访问** 打开后三击电源键锁定在本应用，防止误触
+5. iPad 横放效果最佳：左边时钟 + 进度 + 火箭，右边任务清单
+
+## iPhone / Mac 使用
+
+- iPhone：同样用 Safari 打开后「添加到主屏幕」，随时点开增删任务
+- Mac：浏览器直接打开网址，收藏为书签即可
+- 所有设备看到的是同一份数据，任何一端修改，其他设备几秒内自动刷新
+
+## 可选配置
+
+| 配置 | 方法 |
+|------|------|
+| 换端口 | `daily-plan.service` 里改 `Environment=PORT=3000` 后 `sudo systemctl daemon-reload && sudo systemctl restart daily-plan` |
+| 访问口令 | 服务文件里取消注释 `Environment=ACCESS_CODE=你的口令`，重启服务。之后每台设备首次打开会要求输一次口令（服务器在公网上，建议设置） |
+| 域名 + HTTPS | 用 nginx 反代 3000 端口并配证书。配了 HTTPS 后网页还能自动申请「屏幕常亮」，无需改自动锁定设置 |
+
+## 数据备份
+
+所有任务都在一个文件里：`/opt/daily-plan/data/tasks.json`，定期复制走即可。
+
+## 常见问题
+
+- **打不开网页**：先在服务器上 `curl http://localhost:3000/api/health`，正常说明服务在跑，多半是安全组端口没放行
+- **iPad 不刷新**：页面每 5 秒自动拉取一次；如果显示 OFFLINE，检查服务器或 Wi-Fi
+- **服务挂了**：systemd 会 3 秒内自动拉起；手动看日志 `journalctl -u daily-plan -f`

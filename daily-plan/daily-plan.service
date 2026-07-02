@@ -1,0 +1,20 @@
+# systemd 服务：每日工作计划
+# 用法（假设代码放在 /opt/daily-plan）：
+#   sudo cp daily-plan.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now daily-plan
+[Unit]
+Description=Daily Mission Plan (每日工作计划)
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/daily-plan
+ExecStart=/usr/bin/env node server.js
+Restart=always
+RestartSec=3
+Environment=PORT=3000
+# 可选：设置访问口令，防止陌生人打开网页看到你的任务
+# Environment=ACCESS_CODE=你的口令
+
+[Install]
+WantedBy=multi-user.target

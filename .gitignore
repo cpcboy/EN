@@ -1,0 +1,6 @@
+# 运行时数据（任务内容保存在服务器上，不进仓库）
+daily-plan/data/
+
+node_modules/
+*.log
+.DS_Store
