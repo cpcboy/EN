@@ -102,9 +102,28 @@ def proxy_candidates(state):
     return ordered
 
 
+def _curl_fetch(url, headers, timeout):
+    """用系统 curl 请求（TLS 栈与指纹和 Python 不同，可绕过按客户端指纹放行的 DPI）。
+    header 经 stdin 传入避免出现在进程列表；返回解析后的 JSON，非 2xx 抛 HTTPError。"""
+    marker = '__HTTP_STATUS__:'
+    cmd = ['curl', '-sS', '--max-time', str(timeout), '-H', '@-',
+           '-w', '\n' + marker + '%{http_code}', url]
+    hdr_text = '\n'.join('%s: %s' % (k, v) for k, v in headers.items())
+    out = subprocess.run(cmd, input=hdr_text, capture_output=True, text=True, timeout=timeout + 8)
+    if out.returncode != 0:
+        raise OSError('curl: ' + ((out.stderr or '').strip().splitlines() or ['exit %d' % out.returncode])[-1][:80])
+    body, _, status = out.stdout.rpartition('\n' + marker)
+    if not status.strip().isdigit():
+        raise OSError('curl: no status')
+    code = int(status.strip())
+    if not 200 <= code < 300:
+        raise urllib.error.HTTPError(url, code, 'curl', None, None)
+    return json.loads(body)
+
+
 def fetch_via_any_proxy(req, state):
     """依次尝试各通道。收到 HTTP 响应（含 401 等错误码）说明已连通，按原样抛出/返回。
-    专线/直连场景网络会间歇抖动，直连多试几次。"""
+    专线/直连场景网络会间歇抖动，直连多试几次；urllib 全部失败后用 curl 兜底。"""
     last = None
     for proxy in proxy_candidates(state):
         attempts = 3 if proxy == 'DIRECT' else 1
@@ -119,6 +138,13 @@ def fetch_via_any_proxy(req, state):
                 raise
             except Exception as e:
                 last = e
+    try:
+        headers = dict(req.header_items())
+        return _curl_fetch(req.full_url, headers, 12)
+    except urllib.error.HTTPError:
+        raise
+    except Exception as e:
+        last = e
     raise last if last else OSError('no proxy route')
 
 
