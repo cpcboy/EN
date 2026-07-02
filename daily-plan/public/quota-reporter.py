@@ -101,19 +101,22 @@ def proxy_candidates(state):
 
 
 def fetch_via_any_proxy(req, state):
-    """依次尝试各通道。收到 HTTP 响应（含 401 等错误码）说明已连通，按原样抛出/返回。"""
+    """依次尝试各通道。收到 HTTP 响应（含 401 等错误码）说明已连通，按原样抛出/返回。
+    专线/直连场景网络会间歇抖动，直连多试几次。"""
     last = None
     for proxy in proxy_candidates(state):
-        try:
-            with open_url(req, 12 if proxy == 'DIRECT' else 10, proxy) as resp:
-                data = json.load(resp)
-            state['proxy'] = proxy
-            return data
-        except urllib.error.HTTPError:
-            state['proxy'] = proxy
-            raise
-        except Exception as e:
-            last = e
+        attempts = 3 if proxy == 'DIRECT' else 1
+        for _ in range(attempts):
+            try:
+                with open_url(req, 10, proxy) as resp:
+                    data = json.load(resp)
+                state['proxy'] = proxy
+                return data
+            except urllib.error.HTTPError:
+                state['proxy'] = proxy
+                raise
+            except Exception as e:
+                last = e
     raise last if last else OSError('no proxy route')
 
 
@@ -154,16 +157,14 @@ def read_claude_credentials():
 
 def claude_quota(state):
     tool = {'name': 'CLAUDE CODE'}
-    # 共享出口 IP 下高频访问 usage 接口会触发 429 限流：
-    # 后台(cron)运行时最快每 5 分钟查一次，被限流则退避 15 分钟，
+    # 后台(cron)调度策略：成功后 5 分钟一查（共享出口 IP 查太频繁会 429）；
+    # 网络抖动失败则下一分钟就重试；被限流退避 15 分钟。
     # 间隙沿用服务器上已有数据；手动在终端运行时不受此限制。
     interactive = sys.stdout.isatty()
-    backoff_min = state.get('claude_backoff_min', 5)
-    last_fetch = state.get('claude_last_fetch_ms', 0)
-    if not interactive and now_ms() - last_fetch < backoff_min * 60 * 1000:
+    if not interactive and now_ms() < state.get('claude_next_fetch_ms', 0):
         tool['reuse'] = True
         return tool
-    state['claude_last_fetch_ms'] = now_ms()
+    state['claude_next_fetch_ms'] = now_ms() + 5 * 60 * 1000
     try:
         cred = read_claude_credentials()
         if not cred:
@@ -179,7 +180,6 @@ def claude_quota(state):
             'User-Agent': 'daily-plan-quota-reporter/1.0',
         })
         data = fetch_via_any_proxy(req, state)
-        state['claude_backoff_min'] = 5
         windows = []
         for key, label in (('five_hour', '5H'), ('seven_day', '7D')):
             w = data.get(key)
@@ -198,13 +198,15 @@ def claude_quota(state):
             tool['error'] = '登录已过期：在 Claude Code 里运行 /login 后自动恢复'
         elif e.code == 429:
             tool['error'] = '接口限流，已自动退避，稍后恢复'
-            state['claude_backoff_min'] = 15
+            state['claude_next_fetch_ms'] = now_ms() + 15 * 60 * 1000
         else:
             tool['error'] = 'usage 接口返回 HTTP %d' % e.code
     except urllib.error.URLError:
-        tool['error'] = '连不上 Anthropic：已尝试系统代理/PAC/常用端口，请开代理的增强(TUN)模式或用 DP_PROXY 指定端口'
+        tool['error'] = '连不上 Anthropic（网络波动），每分钟自动重试中'
+        state['claude_next_fetch_ms'] = now_ms() + 55 * 1000
     except Exception as e:
         tool['error'] = '读取失败：' + type(e).__name__
+        state['claude_next_fetch_ms'] = now_ms() + 55 * 1000
     return tool
 
 
