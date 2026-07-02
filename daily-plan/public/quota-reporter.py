@@ -300,6 +300,7 @@ def codex_quota():
     try:
         files = glob.glob(os.path.join(CODEX_SESSIONS, '**', '*.jsonl'), recursive=True)
         files.sort(key=os.path.getmtime, reverse=True)
+        zero_fallback = None
         for path in files[:10]:
             try:
                 with open(path, errors='ignore') as f:
@@ -330,10 +331,20 @@ def codex_quota():
                     resets = w.get('resets_in_seconds')
                     windows.append({'label': label, 'usedPercent': used,
                                     'resetsAt': base + int(resets) * 1000 if resets else None})
-                if windows:
-                    tool['windows'] = windows
-                    tool['asOf'] = base
-                    return tool
+                if not windows:
+                    continue
+                if all(w['usedPercent'] == 0 for w in windows):
+                    # Codex（尤其桌面版）会在会话初始化时写全 0 的额度记录，
+                    # 不可信；继续找最新的非零记录，实在没有才采用
+                    if zero_fallback is None:
+                        zero_fallback = (windows, base)
+                    continue
+                tool['windows'] = windows
+                tool['asOf'] = base
+                return tool
+        if zero_fallback:
+            tool['windows'], tool['asOf'] = zero_fallback
+            return tool
         tool['error'] = '未找到额度记录，先在 Codex 里跑一次任务'
     except Exception as e:
         tool['error'] = '读取失败：' + type(e).__name__
@@ -363,12 +374,20 @@ def merge_previous(tools, headers):
             t = p if p else {'name': t['name'], 'error': '等待下一次查询'}
         elif t.get('error') and not t.get('windows'):
             if p and p.get('windows'):
-                t = {'name': t['name'], 'windows': p['windows'],
-                     'asOf': p.get('asOf'), 'error': t['error']}
+                if not p.get('error') and p.get('asOf') and now_ms() - p['asOf'] < 15 * 60 * 1000:
+                    # 另一台机器刚上报过正常数据：忽略本机的读取失败，避免面板闪现错误
+                    t = p
+                else:
+                    t = {'name': t['name'], 'windows': p['windows'],
+                         'asOf': p.get('asOf'), 'error': t['error']}
         elif t.get('windows') and p and p.get('windows') \
                 and p.get('asOf') and t.get('asOf') and p['asOf'] > t['asOf']:
-            # 另一台电脑上报过更新的数据，保留它
-            t = p
+            # 另一台电脑上报过更新的数据，保留它——除非对方是全 0（会话
+            # 初始化的占位记录）而本机有真实数值
+            p_zero = all(not w.get('usedPercent') for w in p['windows'])
+            t_zero = all(not w.get('usedPercent') for w in t['windows'])
+            if not (p_zero and not t_zero):
+                t = p
         merged.append(t)
     return merged
 
