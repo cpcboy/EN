@@ -26,10 +26,25 @@ node server.js          # 打开 http://localhost:3000
 
 ## 部署到阿里云服务器
 
-以下命令在服务器上执行（Ubuntu / Debian 为例，CentOS 把 `apt` 换成 `yum`）：
+### 方式一：一键脚本（推荐）
+
+以 root 登录服务器（SSH 或阿里云控制台的 Workbench 远程连接均可），粘贴执行：
 
 ```bash
-# 1. 安装 Node.js（已安装可跳过，node -v 显示 v16 以上即可）
+curl -fsSL --connect-timeout 8 https://ghfast.top/https://raw.githubusercontent.com/cpcboy/EN/claude/practical-cray-oe82xr/daily-plan/install.sh -o /tmp/dp.sh \
+ || curl -fsSL --connect-timeout 8 https://raw.githubusercontent.com/cpcboy/EN/claude/practical-cray-oe82xr/daily-plan/install.sh -o /tmp/dp.sh \
+ || curl -fsSL --connect-timeout 8 https://mirror.ghproxy.com/https://raw.githubusercontent.com/cpcboy/EN/claude/practical-cray-oe82xr/daily-plan/install.sh -o /tmp/dp.sh
+bash /tmp/dp.sh
+```
+
+脚本会自动：装 Node.js（走国内镜像）→ 下载代码到 `/opt/daily-plan` → 配置 systemd 开机自启 → 启动并自检。重复执行即为升级，数据不会丢。
+
+可选参数：`DP_PORT=3000 DP_ACCESS_CODE=你的口令 bash /tmp/dp.sh`
+
+### 方式二：手动部署
+
+```bash
+# 1. 安装 Node.js（已安装可跳过，node -v 显示 v14 以上即可）
 sudo apt update && sudo apt install -y nodejs
 
 # 2. 上传代码到 /opt/daily-plan（本机执行，把 IP 换成你的服务器）
@@ -46,9 +61,6 @@ systemctl status daily-plan     # 看到 active (running) 即成功
 **最后一步：开放端口。** 在阿里云控制台 → ECS → 安全组 → 入方向规则，放行 TCP **3000** 端口（授权对象 `0.0.0.0/0`）。
 
 然后在任何设备的浏览器打开：`http://你的服务器IP:3000`
-
-> 也可以用 git 方式部署：在服务器上 `git clone` 本仓库，然后把
-> `daily-plan.service` 里的 `WorkingDirectory` 改成实际路径。
 
 ### 更新版本
 
