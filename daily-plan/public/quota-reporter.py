@@ -17,6 +17,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -28,8 +29,82 @@ CLAUDE_USAGE_URL = os.environ.get('CLAUDE_USAGE_URL', 'https://api.anthropic.com
 CODEX_SESSIONS = os.environ.get('CODEX_SESSIONS_DIR', os.path.expanduser('~/.codex/sessions'))
 
 
+STATE_FILE = os.path.expanduser('~/.quota-reporter.state')
+
+
 def now_ms():
     return int(datetime.datetime.now().timestamp() * 1000)
+
+
+# ---------------- 网络通道 ----------------
+# macOS 上浏览器走系统代理/PAC，但命令行的 Python 默认直连；
+# 直连 api.anthropic.com 在国内不通，所以这里自动探测可用代理。
+def open_url(req, timeout, proxy):
+    handler = urllib.request.ProxyHandler(
+        {} if proxy == 'DIRECT' else {'http': proxy, 'https': proxy})
+    return urllib.request.build_opener(handler).open(req, timeout=timeout)
+
+
+def proxy_candidates():
+    cands = []
+    if os.environ.get('DP_PROXY'):        # 手动指定，最优先
+        cands.append(os.environ['DP_PROXY'])
+    try:                                   # 上次成功的通道
+        with open(STATE_FILE) as f:
+            cached = json.load(f).get('proxy')
+        if cached:
+            cands.append(cached)
+    except Exception:
+        pass
+    try:                                   # 环境变量 / 系统静态代理
+        sysp = urllib.request.getproxies()
+        for k in ('https', 'http'):
+            if sysp.get(k):
+                cands.append(sysp[k])
+    except Exception:
+        pass
+    if sys.platform == 'darwin':           # PAC 文件里的 PROXY 条目
+        try:
+            out = subprocess.run(['scutil', '--proxy'], capture_output=True,
+                                 text=True, timeout=5).stdout
+            m = re.search(r'ProxyAutoConfigURLString\s*:\s*(\S+)', out)
+            if m:
+                pac = urllib.request.urlopen(m.group(1), timeout=5).read().decode(errors='ignore')
+                for hp in re.findall(r'PROXY\s+([\w.\-]+:\d+)', pac):
+                    cands.append('http://' + hp)
+        except Exception:
+            pass
+    for port in (7890, 7897, 1087, 6152, 8118, 8888):   # 常见本地代理端口
+        cands.append('http://127.0.0.1:%d' % port)
+    cands.append('DIRECT')                 # 直连（增强/TUN 模式下可用）放最后
+    seen, ordered = set(), []
+    for c in cands:
+        if '://' not in c and c != 'DIRECT':
+            c = 'http://' + c
+        if c not in seen:
+            seen.add(c)
+            ordered.append(c)
+    return ordered
+
+
+def fetch_via_any_proxy(req):
+    """依次尝试各通道。收到 HTTP 响应（含 401 等错误码）说明已连通，按原样抛出/返回。"""
+    last = None
+    for proxy in proxy_candidates():
+        try:
+            with open_url(req, 12 if proxy == 'DIRECT' else 10, proxy) as resp:
+                data = json.load(resp)
+            try:
+                with open(STATE_FILE, 'w') as f:
+                    json.dump({'proxy': proxy}, f)
+            except OSError:
+                pass
+            return data
+        except urllib.error.HTTPError:
+            raise
+        except Exception as e:
+            last = e
+    raise last if last else OSError('no proxy route')
 
 
 def pct(v):
@@ -83,8 +158,7 @@ def claude_quota():
             'anthropic-beta': 'oauth-2025-04-20',
             'User-Agent': 'daily-plan-quota-reporter/1.0',
         })
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.load(resp)
+        data = fetch_via_any_proxy(req)
         windows = []
         for key, label in (('five_hour', '5H'), ('seven_day', '7D')):
             w = data.get(key)
@@ -101,6 +175,8 @@ def claude_quota():
     except urllib.error.HTTPError as e:
         tool['error'] = ('登录已过期：在 Claude Code 里运行 /login 后自动恢复'
                          if e.code == 401 else 'usage 接口返回 HTTP %d' % e.code)
+    except urllib.error.URLError:
+        tool['error'] = '连不上 Anthropic：已尝试系统代理/PAC/常用端口，请开代理的增强(TUN)模式或用 DP_PROXY 指定端口'
     except Exception as e:
         tool['error'] = '读取失败：' + type(e).__name__
     return tool
@@ -174,7 +250,7 @@ def merge_previous(tools, headers):
     """某工具本次读取失败时，沿用服务器上已有的数值，仅附加错误说明，避免面板被清空。"""
     try:
         req = urllib.request.Request(SERVER + '/api/quota', headers=headers)
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with open_url(req, 10, 'DIRECT') as resp:   # 服务器在国内，固定直连
             prev = json.load(resp)
         prev_tools = {}
         for t in ((((prev or {}).get('quota') or {}).get('data') or {}).get('tools') or []):
@@ -204,7 +280,7 @@ def main():
     req = urllib.request.Request(SERVER + '/api/quota',
                                  data=json.dumps(payload).encode(),
                                  headers=headers, method='POST')
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with open_url(req, 15, 'DIRECT') as resp:   # 服务器在国内，固定直连
         resp.read()
     print('已上报：', json.dumps(payload, ensure_ascii=False))
 
