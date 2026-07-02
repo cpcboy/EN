@@ -139,22 +139,57 @@ def iso_to_ms(s):
 
 
 # ---------------- Claude Code ----------------
-def read_claude_credentials():
-    """macOS 新版 Claude Code 把凭证存在钥匙串；旧版/Linux 存在文件。钥匙串优先。"""
-    if sys.platform == 'darwin':
+CRED_CACHE = os.path.expanduser('~/.quota-reporter.cred')
+
+
+def _keychain_read():
+    """从钥匙串读凭证，返回 (JSON文本或None, 失败原因)。
+    launchd 后台上下文默认搜索列表有时不含登录钥匙串，失败后显式指定路径再试。"""
+    if sys.platform != 'darwin':
+        return None, ''
+    login_kc = os.path.expanduser('~/Library/Keychains/login.keychain-db')
+    last_err = ''
+    for extra in ([], [login_kc]):
         try:
             out = subprocess.run(
-                ['security', 'find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+                ['security', 'find-generic-password', '-s', 'Claude Code-credentials', '-w'] + extra,
                 capture_output=True, text=True, timeout=10)
             if out.returncode == 0 and out.stdout.strip():
-                return json.loads(out.stdout.strip())
-        except Exception:
+                return out.stdout.strip(), ''
+            lines = (out.stderr or '').strip().splitlines()
+            last_err = lines[-1] if lines else ('exit %d' % out.returncode)
+        except Exception as e:
+            last_err = type(e).__name__
+    return None, last_err
+
+
+def read_claude_credentials():
+    """钥匙串 → 官方凭证文件 → 本脚本的缓存。返回 (凭证dict或None, 钥匙串失败原因)。
+    钥匙串读取成功时写入缓存：后台(launchd/cron)读不到钥匙串时靠缓存工作，
+    在终端手动运行一次本脚本即可刷新缓存。"""
+    raw, kc_err = _keychain_read()
+    if raw:
+        try:
+            with open(CRED_CACHE, 'w') as f:
+                f.write(raw)
+            os.chmod(CRED_CACHE, 0o600)
+        except OSError:
+            pass
+        try:
+            return json.loads(raw), ''
+        except ValueError:
             pass
     try:
         with open(CLAUDE_CRED) as f:
-            return json.load(f)
+            return json.load(f), ''
     except (OSError, ValueError):
-        return None
+        pass
+    try:
+        with open(CRED_CACHE) as f:
+            return json.load(f), kc_err
+    except (OSError, ValueError):
+        pass
+    return None, kc_err
 
 
 def claude_quota(state):
@@ -168,13 +203,16 @@ def claude_quota(state):
         return tool
     state['claude_next_fetch_ms'] = now_ms() + 5 * 60 * 1000
     try:
-        cred = read_claude_credentials()
-        if not cred:
-            tool['error'] = '未找到登录凭证，先在 Mac 登录 Claude Code'
-            return tool
-        token = (cred.get('claudeAiOauth') or {}).get('accessToken')
+        cred, kc_err = read_claude_credentials()
+        oauth = (cred or {}).get('claudeAiOauth') or {}
+        token = oauth.get('accessToken')
         if not token:
-            tool['error'] = '未找到登录凭证，先在 Mac 登录 Claude Code'
+            tool['error'] = ('读不到凭证：在终端手动运行一次本脚本即可修复'
+                             + ('（钥匙串：%s）' % kc_err[:60] if kc_err else ''))
+            return tool
+        exp = oauth.get('expiresAt')
+        if exp and exp < now_ms():
+            tool['error'] = '凭证已过期：打开一次 Claude Code 后，在终端运行一次本脚本'
             return tool
         req = urllib.request.Request(CLAUDE_USAGE_URL, headers={
             'Authorization': 'Bearer ' + token,
@@ -363,6 +401,7 @@ def install_launch_agent():
             'ProgramArguments': args,
             'StartInterval': 60,
             'RunAtLoad': True,
+            'LimitLoadToSessionType': 'Aqua',
             'StandardOutPath': '/tmp/quota-reporter.log',
             'StandardErrorPath': '/tmp/quota-reporter.log',
         }, f)
