@@ -14,6 +14,7 @@ const els = {
   listCount: $('listCount'), taskList: $('taskList'), empty: $('empty'),
   addForm: $('addForm'), addInput: $('addInput'), addTime: $('addTime'), addPri: $('addPri'),
   fsBtn: $('fsBtn'),
+  quotaBody: $('quotaBody'), quotaUpdated: $('quotaUpdated'),
   editOverlay: $('editOverlay'), editText: $('editText'), editTime: $('editTime'),
   editPri: $('editPri'), editUp: $('editUp'), editDown: $('editDown'),
   editDelete: $('editDelete'), editCancel: $('editCancel'), editSave: $('editSave'),
@@ -334,6 +335,91 @@ function tickClock() {
   }
 }
 
+/* ---------------- AI 工具额度（灰色弱化显示，数据来自 /api/quota） ---------------- */
+function fmtAge(ms) {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 90) return '刚刚';
+  if (s < 3600) return Math.round(s / 60) + ' 分钟前';
+  if (s < 86400) return Math.round(s / 3600) + ' 小时前';
+  return Math.round(s / 86400) + ' 天前';
+}
+function fmtReset(ms, label) {
+  if (!ms) return '';
+  const d = new Date(ms);
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return (label === '7D' ? `${WEEK[d.getDay()]} ` : '') + hm + ' 重置';
+}
+
+function renderQuota(quota) {
+  els.quotaBody.textContent = '';
+  els.quotaUpdated.textContent = '';
+  const tools = quota && quota.data && Array.isArray(quota.data.tools) ? quota.data.tools : null;
+  if (!tools || !tools.length) {
+    const div = document.createElement('div');
+    div.className = 'q-empty';
+    div.textContent = '暂无数据 · 需在 Mac 上配置上报脚本（见 README）';
+    els.quotaBody.append(div);
+    return;
+  }
+  const updated = Date.parse(quota.updatedAt);
+  if (updated) {
+    const stale = Date.now() - updated > 15 * 60 * 1000;
+    els.quotaUpdated.textContent = fmtAge(updated) + (stale ? ' · 未在更新' : '');
+  }
+  for (const tool of tools.slice(0, 4)) {
+    const box = document.createElement('div');
+    box.className = 'quota-tool';
+    const name = document.createElement('div');
+    name.className = 'quota-tool-name';
+    name.textContent = String(tool.name || '').slice(0, 30);
+    // Codex 的数据取自其最近一次会话记录，太久远时标注数据时间
+    if (tool.asOf && Date.now() - tool.asOf > 2 * 3600 * 1000) {
+      const note = document.createElement('span');
+      note.className = 'q-note';
+      note.textContent = `数据为 ${fmtAge(tool.asOf)}`;
+      name.append(note);
+    }
+    box.append(name);
+    if (tool.error) {
+      const err = document.createElement('div');
+      err.className = 'q-err';
+      err.textContent = String(tool.error).slice(0, 80);
+      box.append(err);
+    }
+    for (const w of Array.isArray(tool.windows) ? tool.windows.slice(0, 3) : []) {
+      const used = Math.min(100, Math.max(0, Number(w.usedPercent) || 0));
+      const remain = Math.round(100 - used);
+      const row = document.createElement('div');
+      row.className = 'quota-row';
+      const label = document.createElement('span');
+      label.className = 'q-label';
+      label.textContent = String(w.label || '').slice(0, 4);
+      const track = document.createElement('span');
+      track.className = 'q-track';
+      const fill = document.createElement('span');
+      fill.className = 'q-fill';
+      fill.style.width = remain + '%';
+      track.append(fill);
+      const val = document.createElement('span');
+      val.className = 'q-val';
+      const reset = fmtReset(w.resetsAt, w.label);
+      val.textContent = `剩 ${remain}%` + (reset ? ` · ${reset}` : '');
+      row.append(label, track, val);
+      box.append(row);
+    }
+    els.quotaBody.append(box);
+  }
+}
+
+async function pullQuota() {
+  try {
+    const r = await api('/api/quota');
+    if (!r.ok) return;
+    const j = await r.json();
+    renderQuota(j.quota);
+  } catch (_) { /* 静默，下轮再试 */ }
+}
+
 /* ---------------- 全屏 ---------------- */
 const fsRoot = document.documentElement;
 const fs = {
@@ -430,7 +516,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 // iOS 从后台/锁屏恢复、窗口重新聚焦、断网恢复时，立即同步一次
-window.addEventListener('pageshow', () => { requestWakeLock(); syncNow(); });
+window.addEventListener('pageshow', () => { requestWakeLock(); syncNow(); pullQuota(); });
 window.addEventListener('focus', () => syncNow());
 window.addEventListener('online', () => syncNow());
 
@@ -449,3 +535,5 @@ loadDate(todayStr());
 initFullscreen();
 requestWakeLock();
 setInterval(syncNow, 5000);
+pullQuota();
+setInterval(pullQuota, 60 * 1000);

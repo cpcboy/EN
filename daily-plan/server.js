@@ -134,6 +134,31 @@ function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, time: new Date().toISOString() });
   }
 
+  // AI 工具额度：Mac 上的 quota-reporter.py 定时 POST，页面 GET 展示
+  if (url.pathname === '/api/quota') {
+    if (req.method === 'GET') {
+      return sendJson(res, 200, { quota: db.quota || null });
+    }
+    if (req.method === 'PUT' || req.method === 'POST') {
+      return readBody(req, 64 * 1024, (err, raw) => {
+        if (err) return sendJson(res, 413, { error: 'body too large' });
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (_) {
+          return sendJson(res, 400, { error: 'invalid json' });
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return sendJson(res, 400, { error: 'quota must be an object' });
+        }
+        db.quota = { data: parsed, updatedAt: new Date().toISOString() };
+        scheduleSave();
+        return sendJson(res, 200, { ok: true });
+      });
+    }
+    return sendJson(res, 405, { error: 'method not allowed' });
+  }
+
   if (url.pathname === '/api/tasks') {
     const date = url.searchParams.get('date') || '';
     if (!DATE_RE.test(date)) return sendJson(res, 400, { error: 'invalid date' });

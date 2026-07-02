@@ -148,24 +148,85 @@ button { cursor: pointer; }
   color: var(--faint);
 }
 
-/* ---------- 火箭线稿 ---------- */
-.rocket-art { display: none; }
-.art-line line,
-.art-line path,
-.art-line rect {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+/* ---------- 额度监控（刻意弱化的灰色仪表区） ---------- */
+.quota {
+  margin-top: 30px;
+  color: var(--faint);
 }
-.art-line .art-fill, .art-fill { fill: var(--ink); stroke: none; }
-.art-text {
-  font-size: 9px;
+.quota-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #efefef;
+}
+.q-eyebrow, .q-updated {
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: .5em;
-  fill: var(--ink);
-  opacity: .7;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: #a8a8a8;
+}
+.q-updated { letter-spacing: .1em; font-weight: 500; }
+.q-empty {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #b3b3b3;
+  letter-spacing: .04em;
+}
+.quota-tool { margin-top: 16px; }
+.quota-tool-name {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .24em;
+  color: #9a9a9a;
+}
+.quota-tool-name .q-note {
+  font-weight: 500;
+  letter-spacing: .06em;
+  margin-left: 8px;
+  color: #bdbdbd;
+}
+.q-err {
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: #b3b3b3;
+  letter-spacing: .03em;
+}
+.quota-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 9px;
+  font-size: 12px;
+  color: #8f8f8f;
+  font-variant-numeric: tabular-nums;
+}
+.q-label {
+  flex: none;
+  width: 24px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: #a8a8a8;
+}
+.q-track {
+  flex: 1;
+  height: 2px;
+  background: #ececec;
+  position: relative;
+}
+.q-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: #bdbdbd;
+}
+.q-val {
+  flex: none;
+  text-align: right;
+  white-space: nowrap;
+  font-size: 11.5px;
 }
 
 .brief-foot {
@@ -533,20 +594,8 @@ body.is-fs .fs-btn .icon-exit { display: block; }
   .clock-date { font-size: clamp(14px, 1.3vw, 18px); }
   .progress-block { margin-top: clamp(20px, 4vh, 40px); }
 
-  .rocket-art {
-    display: flex;
-    flex: 1;
-    align-items: flex-end;
-    justify-content: center;
-    min-height: 0;
-    margin-top: 10px;
-  }
-  .rocket-art svg {
-    height: 100%;
-    max-height: 42vh;
-    width: auto;
-    animation: art-float 7s ease-in-out infinite;
-  }
+  /* 额度面板贴向左栏底部，任务清单仍是视觉重心 */
+  .quota { margin-top: auto; padding-top: 24px; }
 
   .panel-tasks {
     display: flex;
@@ -580,13 +629,7 @@ body.is-fs .fs-btn .icon-exit { display: block; }
   }
 }
 
-@keyframes art-float {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-6px); }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .rocket-art svg { animation: none; }
   .progress-fill, .progress-rocket { transition: none; }
 }
 

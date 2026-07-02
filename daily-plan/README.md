@@ -91,6 +91,23 @@ sudo systemctl restart daily-plan
 | 访问口令 | 服务文件里取消注释 `Environment=ACCESS_CODE=你的口令`，重启服务。之后每台设备首次打开会要求输一次口令（服务器在公网上，建议设置） |
 | 域名 + HTTPS | 用 nginx 反代 3000 端口并配证书。配了 HTTPS 后网页还能自动申请「屏幕常亮」，无需改自动锁定设置 |
 
+## 可选：显示 Claude Code / Codex 额度
+
+页面左下角的「SYSTEMS · 额度监控」可以灰色显示两个工具的 5 小时 / 7 天剩余额度。
+数据由你的 **Mac** 每分钟上报（额度凭证都在 Mac 本地，服务器不保存任何令牌）。
+
+在 Mac 终端执行（把 IP 换成你的服务器）：
+
+```bash
+curl -fsSL http://你的服务器IP:3000/quota-reporter.py -o ~/.quota-reporter.py
+(crontab -l 2>/dev/null | grep -v quota-reporter; echo "* * * * * /usr/bin/python3 $HOME/.quota-reporter.py http://你的服务器IP:3000 >/dev/null 2>&1") | crontab -
+python3 ~/.quota-reporter.py http://你的服务器IP:3000   # 立即上报一次并查看结果
+```
+
+前提：Mac 上登录过 Claude Code；Codex 至少跑过一次任务（额度取自其最近会话记录）。
+设置了访问口令的话，命令末尾追加口令参数：`… http://IP:3000 你的口令`。
+Mac 关机/睡眠期间不上报，页面会显示「未在更新」，开机后自动恢复。
+
 ## 数据备份
 
 所有任务都在一个文件里：`/opt/daily-plan/data/tasks.json`，定期复制走即可。
