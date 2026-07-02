@@ -41,23 +41,34 @@ def now_ms():
 # ---------------- 网络通道 ----------------
 # macOS 上浏览器走系统代理/PAC，但命令行的 Python 默认直连；
 # 直连 api.anthropic.com 在国内不通，所以这里自动探测可用代理。
+def load_state():
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f)
+    except OSError:
+        pass
+
+
 def open_url(req, timeout, proxy):
     handler = urllib.request.ProxyHandler(
         {} if proxy == 'DIRECT' else {'http': proxy, 'https': proxy})
     return urllib.request.build_opener(handler).open(req, timeout=timeout)
 
 
-def proxy_candidates():
+def proxy_candidates(state):
     cands = []
     if os.environ.get('DP_PROXY'):        # 手动指定，最优先
         cands.append(os.environ['DP_PROXY'])
-    try:                                   # 上次成功的通道
-        with open(STATE_FILE) as f:
-            cached = json.load(f).get('proxy')
-        if cached:
-            cands.append(cached)
-    except Exception:
-        pass
+    if state.get('proxy'):                 # 上次成功的通道
+        cands.append(state['proxy'])
     try:                                   # 环境变量 / 系统静态代理
         sysp = urllib.request.getproxies()
         for k in ('https', 'http'):
@@ -89,20 +100,17 @@ def proxy_candidates():
     return ordered
 
 
-def fetch_via_any_proxy(req):
+def fetch_via_any_proxy(req, state):
     """依次尝试各通道。收到 HTTP 响应（含 401 等错误码）说明已连通，按原样抛出/返回。"""
     last = None
-    for proxy in proxy_candidates():
+    for proxy in proxy_candidates(state):
         try:
             with open_url(req, 12 if proxy == 'DIRECT' else 10, proxy) as resp:
                 data = json.load(resp)
-            try:
-                with open(STATE_FILE, 'w') as f:
-                    json.dump({'proxy': proxy}, f)
-            except OSError:
-                pass
+            state['proxy'] = proxy
             return data
         except urllib.error.HTTPError:
+            state['proxy'] = proxy
             raise
         except Exception as e:
             last = e
@@ -144,8 +152,18 @@ def read_claude_credentials():
         return None
 
 
-def claude_quota():
+def claude_quota(state):
     tool = {'name': 'CLAUDE CODE'}
+    # 共享出口 IP 下高频访问 usage 接口会触发 429 限流：
+    # 后台(cron)运行时最快每 5 分钟查一次，被限流则退避 15 分钟，
+    # 间隙沿用服务器上已有数据；手动在终端运行时不受此限制。
+    interactive = sys.stdout.isatty()
+    backoff_min = state.get('claude_backoff_min', 5)
+    last_fetch = state.get('claude_last_fetch_ms', 0)
+    if not interactive and now_ms() - last_fetch < backoff_min * 60 * 1000:
+        tool['reuse'] = True
+        return tool
+    state['claude_last_fetch_ms'] = now_ms()
     try:
         cred = read_claude_credentials()
         if not cred:
@@ -160,7 +178,8 @@ def claude_quota():
             'anthropic-beta': 'oauth-2025-04-20',
             'User-Agent': 'daily-plan-quota-reporter/1.0',
         })
-        data = fetch_via_any_proxy(req)
+        data = fetch_via_any_proxy(req, state)
+        state['claude_backoff_min'] = 5
         windows = []
         for key, label in (('five_hour', '5H'), ('seven_day', '7D')):
             w = data.get(key)
@@ -175,8 +194,13 @@ def claude_quota():
             tool['windows'] = windows
             tool['asOf'] = now_ms()
     except urllib.error.HTTPError as e:
-        tool['error'] = ('登录已过期：在 Claude Code 里运行 /login 后自动恢复'
-                         if e.code == 401 else 'usage 接口返回 HTTP %d' % e.code)
+        if e.code == 401:
+            tool['error'] = '登录已过期：在 Claude Code 里运行 /login 后自动恢复'
+        elif e.code == 429:
+            tool['error'] = '接口限流，已自动退避，稍后恢复'
+            state['claude_backoff_min'] = 15
+        else:
+            tool['error'] = 'usage 接口返回 HTTP %d' % e.code
     except urllib.error.URLError:
         tool['error'] = '连不上 Anthropic：已尝试系统代理/PAC/常用端口，请开代理的增强(TUN)模式或用 DP_PROXY 指定端口'
     except Exception as e:
@@ -262,7 +286,11 @@ def merge_previous(tools, headers):
         return tools
     merged = []
     for t in tools:
-        if t.get('error') and not t.get('windows'):
+        if t.get('reuse'):
+            # 本轮跳过查询（限流退避期），原样沿用服务器上的数据
+            p = prev_tools.get(t['name'])
+            t = p if p else {'name': t['name'], 'error': '等待下一次查询'}
+        elif t.get('error') and not t.get('windows'):
             p = prev_tools.get(t['name'])
             if p and p.get('windows'):
                 t = {'name': t['name'], 'windows': p['windows'],
@@ -320,7 +348,9 @@ def main():
     headers = {'Content-Type': 'application/json'}
     if ACCESS_CODE:
         headers['X-Access-Code'] = ACCESS_CODE
-    tools = merge_previous([claude_quota(), codex_quota()], headers)
+    state = load_state()
+    tools = merge_previous([claude_quota(state), codex_quota()], headers)
+    save_state(state)
     payload = {'tools': tools, 'reportedAt': now_ms()}
     req = urllib.request.Request(SERVER + '/api/quota',
                                  data=json.dumps(payload).encode(),
