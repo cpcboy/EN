@@ -341,7 +341,10 @@ def codex_quota():
 
 
 def merge_previous(tools, headers):
-    """某工具本次读取失败时，沿用服务器上已有的数值，仅附加错误说明，避免面板被清空。"""
+    """与服务器上已有数据合并：
+    - 本次读取失败/跳过的工具沿用旧数值，避免面板被清空
+    - 多台电脑同时上报时，按 asOf 时间戳「谁的数据新用谁的」
+      （例如 Codex 主要在 MacBook 上用，Mac mini 的旧记录不会覆盖它）"""
     try:
         req = urllib.request.Request(SERVER + '/api/quota', headers=headers)
         with open_url(req, 10, 'DIRECT') as resp:   # 服务器在国内，固定直连
@@ -354,15 +357,18 @@ def merge_previous(tools, headers):
         return tools
     merged = []
     for t in tools:
+        p = prev_tools.get(t.get('name'))
         if t.get('reuse'):
             # 本轮跳过查询（限流退避期），原样沿用服务器上的数据
-            p = prev_tools.get(t['name'])
             t = p if p else {'name': t['name'], 'error': '等待下一次查询'}
         elif t.get('error') and not t.get('windows'):
-            p = prev_tools.get(t['name'])
             if p and p.get('windows'):
                 t = {'name': t['name'], 'windows': p['windows'],
                      'asOf': p.get('asOf'), 'error': t['error']}
+        elif t.get('windows') and p and p.get('windows') \
+                and p.get('asOf') and t.get('asOf') and p['asOf'] > t['asOf']:
+            # 另一台电脑上报过更新的数据，保留它
+            t = p
         merged.append(t)
     return merged
 
