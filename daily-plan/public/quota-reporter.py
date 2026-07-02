@@ -80,7 +80,7 @@ def claude_quota():
     except FileNotFoundError:
         tool['error'] = '未安装或未登录 Claude Code'
     except urllib.error.HTTPError as e:
-        tool['error'] = ('登录已过期，打开一次 Claude Code 即可恢复'
+        tool['error'] = ('登录已过期：在 Claude Code 里运行 /login 后自动恢复'
                          if e.code == 401 else 'usage 接口返回 HTTP %d' % e.code)
     except Exception as e:
         tool['error'] = '读取失败：' + type(e).__name__
