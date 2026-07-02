@@ -191,6 +191,23 @@ button { cursor: pointer; }
   color: var(--ink);
 }
 .datenav-btn:active { background: var(--ink); color: var(--paper); }
+.fs-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fs-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.fs-btn .icon-exit { display: none; }
+body.is-fs .fs-btn .icon-enter { display: none; }
+body.is-fs .fs-btn .icon-exit { display: block; }
 .datenav-label {
   flex: 1;
   background: none;

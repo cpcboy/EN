@@ -13,6 +13,7 @@ const els = {
   carryover: $('carryover'), carryCount: $('carryCount'), carryBtn: $('carryBtn'),
   listCount: $('listCount'), taskList: $('taskList'), empty: $('empty'),
   addForm: $('addForm'), addInput: $('addInput'), addTime: $('addTime'), addPri: $('addPri'),
+  fsBtn: $('fsBtn'),
   editOverlay: $('editOverlay'), editText: $('editText'), editTime: $('editTime'),
   editPri: $('editPri'), editUp: $('editUp'), editDown: $('editDown'),
   editDelete: $('editDelete'), editCancel: $('editCancel'), editSave: $('editSave'),
@@ -97,7 +98,14 @@ async function flush() {
     for (const [date, body] of [...pending]) {
       setSync('saving');
       const r = await api(`/api/tasks?date=${date}`, { method: 'PUT', body });
-      if (!r.ok) throw new Error('save failed');
+      if (!r.ok) {
+        if (r.status >= 400 && r.status < 500) {
+          // 请求本身无效，重试也不会成功：放弃这条改动，避免永久卡住同步
+          pending.delete(date);
+          continue;
+        }
+        throw new Error('save failed');
+      }
       if (pending.get(date) === body) pending.delete(date); // 期间无新改动才出队
       setSync('ok');
     }
@@ -326,6 +334,36 @@ function tickClock() {
   }
 }
 
+/* ---------------- 全屏 ---------------- */
+const fsRoot = document.documentElement;
+const fs = {
+  supported: !!(fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen),
+  element: () => document.fullscreenElement || document.webkitFullscreenElement || null,
+  async toggle() {
+    try {
+      if (fs.element()) {
+        await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      } else {
+        await (fsRoot.requestFullscreen || fsRoot.webkitRequestFullscreen).call(fsRoot);
+      }
+    } catch (_) { /* 浏览器拒绝时忽略 */ }
+  },
+};
+function initFullscreen() {
+  // 从主屏幕图标打开（standalone）本身就是全屏，无需按钮
+  const standalone = navigator.standalone === true ||
+    (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  if (!fs.supported || standalone) return;
+  els.fsBtn.hidden = false;
+  els.fsBtn.addEventListener('click', () => fs.toggle());
+  for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) {
+    document.addEventListener(ev, () => {
+      document.body.classList.toggle('is-fs', !!fs.element());
+      els.fsBtn.setAttribute('aria-label', fs.element() ? '退出全屏' : '全屏显示');
+    });
+  }
+}
+
 /* ---------------- 屏幕常亮（需 HTTPS；HTTP 下请在 iPad 设置中关闭自动锁定） ---------------- */
 async function requestWakeLock() {
   if (!('wakeLock' in navigator)) return;
@@ -391,6 +429,11 @@ document.addEventListener('visibilitychange', () => {
     checkCarryover();
   }
 });
+// iOS 从后台/锁屏恢复、窗口重新聚焦、断网恢复时，立即同步一次
+window.addEventListener('pageshow', () => { requestWakeLock(); syncNow(); });
+window.addEventListener('focus', () => syncNow());
+window.addEventListener('online', () => syncNow());
+
 window.addEventListener('pagehide', () => {
   // 关页前尽力把未保存的改动发出去
   for (const [date, body] of pending) {
@@ -403,5 +446,6 @@ window.addEventListener('pagehide', () => {
 tickClock();
 setInterval(tickClock, 1000);
 loadDate(todayStr());
+initFullscreen();
 requestWakeLock();
 setInterval(syncNow, 5000);
