@@ -17,6 +17,7 @@ import datetime
 import glob
 import json
 import os
+import subprocess
 import sys
 import urllib.request
 
@@ -48,14 +49,34 @@ def iso_to_ms(s):
 
 
 # ---------------- Claude Code ----------------
+def read_claude_credentials():
+    """macOS 新版 Claude Code 把凭证存在钥匙串；旧版/Linux 存在文件。钥匙串优先。"""
+    if sys.platform == 'darwin':
+        try:
+            out = subprocess.run(
+                ['security', 'find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+                capture_output=True, text=True, timeout=10)
+            if out.returncode == 0 and out.stdout.strip():
+                return json.loads(out.stdout.strip())
+        except Exception:
+            pass
+    try:
+        with open(CLAUDE_CRED) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
 def claude_quota():
     tool = {'name': 'CLAUDE CODE'}
     try:
-        with open(CLAUDE_CRED) as f:
-            cred = json.load(f)
+        cred = read_claude_credentials()
+        if not cred:
+            tool['error'] = '未找到登录凭证，先在 Mac 登录 Claude Code'
+            return tool
         token = (cred.get('claudeAiOauth') or {}).get('accessToken')
         if not token:
-            tool['error'] = '未找到登录凭证，先在 Mac 打开一次 Claude Code'
+            tool['error'] = '未找到登录凭证，先在 Mac 登录 Claude Code'
             return tool
         req = urllib.request.Request(CLAUDE_USAGE_URL, headers={
             'Authorization': 'Bearer ' + token,
@@ -77,8 +98,6 @@ def claude_quota():
         else:
             tool['windows'] = windows
             tool['asOf'] = now_ms()
-    except FileNotFoundError:
-        tool['error'] = '未安装或未登录 Claude Code'
     except urllib.error.HTTPError as e:
         tool['error'] = ('登录已过期：在 Claude Code 里运行 /login 后自动恢复'
                          if e.code == 401 else 'usage 接口返回 HTTP %d' % e.code)
@@ -151,13 +170,37 @@ def codex_quota():
     return tool
 
 
+def merge_previous(tools, headers):
+    """某工具本次读取失败时，沿用服务器上已有的数值，仅附加错误说明，避免面板被清空。"""
+    try:
+        req = urllib.request.Request(SERVER + '/api/quota', headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            prev = json.load(resp)
+        prev_tools = {}
+        for t in ((((prev or {}).get('quota') or {}).get('data') or {}).get('tools') or []):
+            if isinstance(t, dict) and t.get('name'):
+                prev_tools[t['name']] = t
+    except Exception:
+        return tools
+    merged = []
+    for t in tools:
+        if t.get('error') and not t.get('windows'):
+            p = prev_tools.get(t['name'])
+            if p and p.get('windows'):
+                t = {'name': t['name'], 'windows': p['windows'],
+                     'asOf': p.get('asOf'), 'error': t['error']}
+        merged.append(t)
+    return merged
+
+
 def main():
     if not SERVER:
         sys.exit('用法：python3 quota-reporter.py http://服务器IP:3000 [访问口令]')
-    payload = {'tools': [claude_quota(), codex_quota()], 'reportedAt': now_ms()}
     headers = {'Content-Type': 'application/json'}
     if ACCESS_CODE:
         headers['X-Access-Code'] = ACCESS_CODE
+    tools = merge_previous([claude_quota(), codex_quota()], headers)
+    payload = {'tools': tools, 'reportedAt': now_ms()}
     req = urllib.request.Request(SERVER + '/api/quota',
                                  data=json.dumps(payload).encode(),
                                  headers=headers, method='POST')
