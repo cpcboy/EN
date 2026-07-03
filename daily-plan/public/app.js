@@ -529,6 +529,11 @@ window.addEventListener('pagehide', () => {
 });
 
 /* ---------------- 启动 ---------------- */
+// 系统开启「减弱动态效果」时暂停星轨动画
+if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  document.querySelectorAll('svg').forEach((s) => s.pauseAnimations && s.pauseAnimations());
+}
+
 tickClock();
 setInterval(tickClock, 1000);
 loadDate(todayStr());

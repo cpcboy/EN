@@ -79,6 +79,54 @@
       <div class="progress-note" id="progressNote">STANDING BY · 等待任务</div>
     </div>
 
+    <!-- 星轨图：行星绕恒星缓慢公转（纯装饰，横屏显示） -->
+    <div class="orrery" aria-hidden="true">
+      <svg class="orrery-svg" viewBox="-170 -170 340 340">
+        <!-- 轨道 -->
+        <circle class="o-ring" r="34"/>
+        <circle class="o-ring" r="62"/>
+        <circle class="o-ring" r="92"/>
+        <circle class="o-ring" r="124"/>
+        <circle class="o-ring o-ring-dash" r="152"/>
+        <!-- 恒星 -->
+        <circle class="o-star-halo" r="8.5"/>
+        <circle class="o-star" r="4.5"/>
+        <!-- 内行星 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="40 0 0" to="400 0 0" dur="80s" repeatCount="indefinite"/>
+          <circle cx="34" r="2.6" fill="#9a9a9a"/>
+        </g>
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="130 0 0" to="490 0 0" dur="150s" repeatCount="indefinite"/>
+          <circle cx="62" r="3.6" fill="#6f6f6f"/>
+        </g>
+        <!-- 带卫星的行星 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="260 0 0" to="620 0 0" dur="260s" repeatCount="indefinite"/>
+          <g transform="translate(92 0)">
+            <circle r="3" fill="#a9a9a9"/>
+            <g>
+              <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="14s" repeatCount="indefinite"/>
+              <circle cx="8.5" r="1.3" fill="#9c9c9c"/>
+            </g>
+          </g>
+        </g>
+        <!-- 带光环的行星 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="330 0 0" to="690 0 0" dur="420s" repeatCount="indefinite"/>
+          <g transform="translate(124 0)">
+            <circle r="4.2" fill="#7a7a7a"/>
+            <ellipse class="o-belt" rx="8" ry="2.6" transform="rotate(-16)"/>
+          </g>
+        </g>
+        <!-- 远行星 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="200 0 0" to="560 0 0" dur="640s" repeatCount="indefinite"/>
+          <circle cx="152" r="2.4" fill="#b5b5b5"/>
+        </g>
+      </svg>
+    </div>
+
     <!-- AI 工具额度监控（灰色弱化显示，由 Mac 上的脚本定时上报） -->
     <div class="quota" id="quotaBlock">
       <div class="quota-head">

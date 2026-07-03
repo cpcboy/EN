@@ -148,6 +148,14 @@ button { cursor: pointer; }
   color: var(--faint);
 }
 
+/* ---------- 星轨图（装饰，仅横屏显示） ---------- */
+.orrery { display: none; }
+.o-ring { fill: none; stroke: #e8e8e8; stroke-width: 1; }
+.o-ring-dash { stroke-dasharray: 2 7; }
+.o-star { fill: #1a1a1a; }
+.o-star-halo { fill: none; stroke: #d9d9d9; stroke-width: 1; }
+.o-belt { fill: none; stroke: #8f8f8f; stroke-width: 1.1; }
+
 /* ---------- 额度监控（刻意弱化的灰色仪表区） ---------- */
 .quota {
   margin-top: 30px;
@@ -594,8 +602,22 @@ body.is-fs .fs-btn .icon-exit { display: block; }
   .clock-date { font-size: clamp(14px, 1.3vw, 18px); }
   .progress-block { margin-top: clamp(20px, 4vh, 40px); }
 
-  /* 额度面板贴向左栏底部，任务清单仍是视觉重心 */
-  .quota { margin-top: auto; padding-top: 24px; }
+  /* 星轨图占据中部弹性空间，额度面板贴向左栏底部 */
+  .orrery {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    align-items: center;
+    justify-content: center;
+    margin-top: 10px;
+  }
+  .orrery svg {
+    height: 100%;
+    max-height: 42vh;
+    max-width: 100%;
+    width: auto;
+  }
+  .quota { margin-top: auto; padding-top: 20px; }
 
   .panel-tasks {
     display: flex;
