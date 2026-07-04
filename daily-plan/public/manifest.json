@@ -1,0 +1,16 @@
+{
+  "name": "每日工作计划",
+  "short_name": "工作计划",
+  "description": "SpaceX 风格的每日任务面板 — iPad 常显，iPhone / Mac 随时编辑",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

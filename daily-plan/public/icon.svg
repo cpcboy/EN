@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#ffffff"/>
+  <circle cx="256" cy="256" r="216" fill="none" stroke="#000" stroke-width="10"/>
+  <circle cx="256" cy="256" r="186" fill="none" stroke="#000" stroke-width="3" stroke-dasharray="3 14" opacity=".55"/>
+  <!-- 火箭 -->
+  <path d="M256 92 C290 142 294 206 294 252 L294 316 L256 342 L218 316 L218 252 C218 206 222 142 256 92 Z" fill="#000"/>
+  <circle cx="256" cy="204" r="21" fill="#fff"/>
+  <circle cx="256" cy="204" r="10" fill="#000"/>
+  <path d="M218 264 L170 342 L218 322 Z" fill="#000"/>
+  <path d="M294 264 L342 342 L294 322 Z" fill="#000"/>
+  <path d="M240 350 L256 402 L272 350 Z" fill="#000"/>
+  <!-- 星点 -->
+  <circle cx="150" cy="150" r="7" fill="#000"/>
+  <circle cx="368" cy="132" r="5" fill="#000"/>
+  <circle cx="352" cy="382" r="6" fill="#000"/>
+  <path d="M148 368 l0 26 M135 381 l26 0" stroke="#000" stroke-width="6" stroke-linecap="round"/>
+</svg>

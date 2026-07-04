@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>每日工作计划 · DAILY MISSION PLAN</title>
+<meta name="description" content="每日工作计划面板 — 在 iPad 上常显，在 iPhone / Mac 上随时查看与编辑。">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="工作计划">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 背景：星空 / 轨道 / 行星（极浅的黑色线条，保持白底简洁） -->
+<svg class="bg-space" viewBox="0 0 1400 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+  <g class="bg-stars" fill="#000">
+    <circle cx="80"  cy="120" r="1.6"/><circle cx="210" cy="60"  r="1.1"/>
+    <circle cx="340" cy="180" r="1.3"/><circle cx="500" cy="90"  r="1.7"/>
+    <circle cx="660" cy="150" r="1.0"/><circle cx="760" cy="60"  r="1.4"/>
+    <circle cx="930" cy="130" r="1.2"/><circle cx="1060" cy="70" r="1.6"/>
+    <circle cx="1200" cy="170" r="1.1"/><circle cx="1330" cy="90" r="1.4"/>
+    <circle cx="150" cy="320" r="1.2"/><circle cx="60"  cy="520" r="1.5"/>
+    <circle cx="260" cy="640" r="1.1"/><circle cx="120" cy="780" r="1.3"/>
+    <circle cx="420" cy="820" r="1.5"/><circle cx="700" cy="760" r="1.1"/>
+    <circle cx="950" cy="830" r="1.4"/><circle cx="1150" cy="720" r="1.2"/>
+    <circle cx="1310" cy="560" r="1.5"/><circle cx="1350" cy="330" r="1.1"/>
+    <circle cx="880" cy="420" r="1.0"/><circle cx="1240" cy="440" r="1.2"/>
+    <path class="star-cross" d="M580 300 l0 14 M573 307 l14 0"/>
+    <path class="star-cross" d="M1100 600 l0 12 M1094 606 l12 0"/>
+    <path class="star-cross" d="M300 460 l0 12 M294 466 l12 0"/>
+  </g>
+  <!-- 大轨道弧线 -->
+  <circle class="bg-orbit" cx="-140" cy="1050" r="640"/>
+  <circle class="bg-orbit" cx="-140" cy="1050" r="760"/>
+  <!-- 右上：带环行星 -->
+  <g class="bg-planet" transform="translate(1265,135)">
+    <circle r="58"/>
+    <ellipse rx="104" ry="26" transform="rotate(-18)"/>
+    <path d="M-46 -22 q30 18 78 10" />
+  </g>
+</svg>
+
+<div class="app" id="app">
+
+  <!-- 左栏 / 顶部：任务简报（时钟、日期、进度、火箭） -->
+  <aside class="panel-brief">
+    <header class="brief-head">
+      <div class="eyebrow">MISSION CONTROL · 任务控制台</div>
+      <h1>每日工作计划</h1>
+      <div class="brand-sub">DAILY&nbsp;MISSION&nbsp;PLAN</div>
+    </header>
+
+    <div class="clock-block">
+      <div class="clock" id="clock" aria-live="off">
+        <span id="clockHM">--:--</span>
+      </div>
+      <div class="clock-date" id="clockDate">— — —</div>
+    </div>
+
+    <div class="progress-block">
+      <div class="progress-head">
+        <span class="eyebrow">MISSION PROGRESS · 完成进度</span>
+        <span class="progress-num" id="progressNum">0/0</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+        <svg class="progress-rocket" id="progressRocket" viewBox="0 0 30 12" aria-hidden="true">
+          <path d="M2 6 L7 1.5 H17 Q24 1.5 28 6 Q24 10.5 17 10.5 H7 Z" fill="#000"/>
+          <circle cx="19" cy="6" r="1.6" fill="#fff"/>
+          <path d="M2 6 L7 3 V9 Z" fill="#000"/>
+        </svg>
+      </div>
+      <div class="progress-note" id="progressNote">STANDING BY · 等待任务</div>
+    </div>
+
+    <!-- 星轨图：行星绕恒星缓慢公转（纯装饰，横屏显示） -->
+    <div class="orrery" aria-hidden="true">
+      <svg class="orrery-svg" viewBox="-170 -170 340 340">
+        <!-- 轨道 -->
+        <circle class="o-ring" r="34"/>
+        <circle class="o-ring" r="62"/>
+        <circle class="o-ring" r="92"/>
+        <circle class="o-ring" r="124"/>
+        <circle class="o-ring o-ring-dash" r="152"/>
+        <!-- 恒星 -->
+        <circle class="o-star-halo" r="8.5"/>
+        <circle class="o-star" r="4.5"/>
+        <!-- 内行星 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="40 0 0" to="400 0 0" dur="80s" repeatCount="indefinite"/>
+          <circle cx="34" r="2.6" fill="#9a9a9a"/>
+        </g>
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="130 0 0" to="490 0 0" dur="150s" repeatCount="indefinite"/>
+          <circle cx="62" r="3.6" fill="#6f6f6f"/>
+        </g>
+        <!-- 带卫星的行星 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="260 0 0" to="620 0 0" dur="260s" repeatCount="indefinite"/>
+          <g transform="translate(92 0)">
+            <circle r="3" fill="#a9a9a9"/>
+            <g>
+              <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="14s" repeatCount="indefinite"/>
+              <circle cx="8.5" r="1.3" fill="#9c9c9c"/>
+            </g>
+          </g>
+        </g>
+        <!-- 带光环的行星 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="330 0 0" to="690 0 0" dur="420s" repeatCount="indefinite"/>
+          <g transform="translate(124 0)">
+            <circle r="4.2" fill="#7a7a7a"/>
+            <ellipse class="o-belt" rx="8" ry="2.6" transform="rotate(-16)"/>
+          </g>
+        </g>
+        <!-- 远行星 -->
+        <g>
+          <animateTransform attributeName="transform" type="rotate" from="200 0 0" to="560 0 0" dur="640s" repeatCount="indefinite"/>
+          <circle cx="152" r="2.4" fill="#b5b5b5"/>
+        </g>
+      </svg>
+    </div>
+
+    <!-- AI 工具额度监控（灰色弱化显示，由 Mac 上的脚本定时上报） -->
+    <div class="quota" id="quotaBlock">
+      <div class="quota-head">
+        <span class="q-eyebrow">SYSTEMS · 额度监控</span>
+        <span class="q-updated" id="quotaUpdated"></span>
+      </div>
+      <div id="quotaBody">
+        <div class="q-empty">暂无数据 · 需在 Mac 上配置上报脚本（见 README）</div>
+      </div>
+    </div>
+
+    <div class="brief-foot eyebrow" id="syncStatus">CONNECTING…</div>
+  </aside>
+
+  <!-- 右栏：任务清单 -->
+  <main class="panel-tasks">
+
+    <nav class="datenav">
+      <button class="datenav-btn" id="prevDay" aria-label="前一天">‹</button>
+      <button class="datenav-label" id="dateLabel" title="点击回到今天">今天</button>
+      <button class="datenav-btn" id="nextDay" aria-label="后一天">›</button>
+      <button class="datenav-btn fs-btn" id="fsBtn" aria-label="全屏显示" title="全屏显示" hidden>
+        <svg class="icon-enter" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 3H3v5 M16 3h5v5 M21 16v5h-5 M8 21H3v-5"/>
+        </svg>
+        <svg class="icon-exit" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 8h5V3 M16 3v5h5 M21 16h-5v5 M8 21v-5H3"/>
+        </svg>
+      </button>
+    </nav>
+
+    <div class="carryover" id="carryover" hidden>
+      <span>昨日还有 <b id="carryCount">0</b> 项未完成</span>
+      <button id="carryBtn" type="button">移到今天 →</button>
+    </div>
+
+    <div class="list-head">
+      <span class="eyebrow">TASKS · 任务清单</span>
+      <span class="eyebrow list-count" id="listCount"></span>
+    </div>
+
+    <ul class="task-list" id="taskList"></ul>
+
+    <div class="empty" id="empty" hidden>
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle cx="60" cy="60" r="46" fill="none" stroke="#000" stroke-width="1.4"/>
+        <circle cx="60" cy="60" r="56" fill="none" stroke="#000" stroke-width="0.8" stroke-dasharray="2 7" opacity=".55"/>
+        <path d="M60 30 Q69 42 69 58 L69 74 L60 82 L51 74 L51 58 Q51 42 60 30 Z" fill="none" stroke="#000" stroke-width="1.6"/>
+        <circle cx="60" cy="54" r="4.4" fill="none" stroke="#000" stroke-width="1.4"/>
+        <path d="M51 66 L42 80 L51 77 M69 66 L78 80 L69 77" fill="none" stroke="#000" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M56 84 L60 94 L64 84" fill="none" stroke="#000" stroke-width="1.4"/>
+      </svg>
+      <div class="empty-title">NO MISSIONS SCHEDULED</div>
+      <div class="empty-sub">这一天暂无任务，在下方添加</div>
+    </div>
+
+    <form class="addbar" id="addForm" autocomplete="off">
+      <input class="add-input" id="addInput" type="text" maxlength="500"
+             placeholder="添加任务，回车确认 …" enterkeyhint="done">
+      <input class="add-time" id="addTime" type="time" aria-label="时间（可选）">
+      <button class="add-pri" id="addPri" type="button" aria-pressed="false" title="标记重点">▲</button>
+      <button class="add-submit" type="submit">添加</button>
+    </form>
+
+  </main>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="overlay" id="editOverlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-label="编辑任务">
+    <div class="modal-head eyebrow">EDIT MISSION · 编辑任务</div>
+    <input class="modal-text" id="editText" type="text" maxlength="500">
+    <div class="modal-row">
+      <input class="modal-time" id="editTime" type="time" aria-label="时间（可选）">
+      <button class="modal-pri" id="editPri" type="button" aria-pressed="false">▲ 重点</button>
+    </div>
+    <div class="modal-row modal-tools">
+      <button type="button" id="editUp">↑ 上移</button>
+      <button type="button" id="editDown">↓ 下移</button>
+      <button type="button" class="danger" id="editDelete">删除</button>
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="editCancel">取消</button>
+      <button type="button" class="primary" id="editSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 访问口令（仅当服务器设置 ACCESS_CODE 时出现） -->
+<div class="overlay" id="codeOverlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-label="访问口令">
+    <div class="modal-head eyebrow">ACCESS CODE · 访问口令</div>
+    <input class="modal-text" id="codeInput" type="password" placeholder="请输入访问口令" enterkeyhint="go">
+    <div class="modal-actions">
+      <button type="button" class="primary" id="codeSubmit">进入</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
