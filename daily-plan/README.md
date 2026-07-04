@@ -116,15 +116,13 @@ Mac 关机/睡眠期间不上报，页面会显示「未在更新」，开机后
 上报的都是总量；Codex 额度取自各机器本地记录。合并在**服务器端**按工具逐个进行：
 旧数据不覆盖新数据、全 0 占位记录不采纳、错误上报不清空已有数值。
 
-**推荐再装一个自愈钩子**（每台 Mac 一次）：
+**Claude 凭证自动续期**：令牌每日轮换，脚本会在过期时用 refresh token 自动换新
+（与 Claude Code 自身的续期机制一致），换到的新凭证写回缓存与钥匙串——**日常零维护**。
+极端情况下续期失败时面板会灰字提示，在终端 Claude Code 里 `/login` 一次即可恢复。
 
-```bash
-python3 ~/.quota-reporter.py --install-hook
-```
-
-它在 Claude Code 里注册一个启动钩子：每次使用 Claude Code（终端或桌面版）时自动
-刷新凭证缓存。此后凭证每日轮换也无需手动干预，面板即使显示「凭证已过期」，
-用一次 Claude Code 就自动恢复。原配置会先备份到 `settings.json.bak-quota`。
+可选的双保险钩子（每台 Mac 一次）：`python3 ~/.quota-reporter.py --install-hook`
+——在 Claude Code 注册启动钩子，每次使用终端版时顺带刷新凭证缓存
+（原配置先备份到 `settings.json.bak-quota`）。
 
 ## 数据备份
 

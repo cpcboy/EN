@@ -32,6 +32,8 @@ ACCESS_CODE = _args[1] if len(_args) > 1 else os.environ.get('DP_ACCESS_CODE', '
 AGENT_LABEL = 'com.dailyplan.quota-reporter'
 CLAUDE_CRED = os.environ.get('CLAUDE_CRED_FILE', os.path.expanduser('~/.claude/.credentials.json'))
 CLAUDE_USAGE_URL = os.environ.get('CLAUDE_USAGE_URL', 'https://api.anthropic.com/api/oauth/usage')
+CLAUDE_TOKEN_URL = os.environ.get('CLAUDE_TOKEN_URL', 'https://console.anthropic.com/v1/oauth/token')
+CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'  # Claude Code 的公开 OAuth client_id
 CODEX_SESSIONS = os.environ.get('CODEX_SESSIONS_DIR', os.path.expanduser('~/.codex/sessions'))
 
 
@@ -104,14 +106,31 @@ def proxy_candidates(state):
     return ordered
 
 
-def _curl_fetch(url, headers, timeout):
+def _curl_fetch(url, headers, timeout, body=None):
     """用系统 curl 请求（TLS 栈与指纹和 Python 不同，可绕过按客户端指纹放行的 DPI）。
-    header 经 stdin 传入避免出现在进程列表；返回解析后的 JSON，非 2xx 抛 HTTPError。"""
+    header 经 stdin、body 经临时文件传入，避免敏感内容出现在进程列表；
+    返回解析后的 JSON，非 2xx 抛 HTTPError。"""
+    import tempfile
     marker = '__HTTP_STATUS__:'
     cmd = ['curl', '-sS', '--max-time', str(timeout), '-H', '@-',
-           '-w', '\n' + marker + '%{http_code}', url]
+           '-w', '\n' + marker + '%{http_code}']
+    tmp_body = None
+    if body is not None:
+        fd, tmp_body = tempfile.mkstemp()
+        os.write(fd, body)
+        os.close(fd)
+        os.chmod(tmp_body, 0o600)
+        cmd += ['--data-binary', '@' + tmp_body]
+    cmd.append(url)
     hdr_text = '\n'.join('%s: %s' % (k, v) for k, v in headers.items())
-    out = subprocess.run(cmd, input=hdr_text, capture_output=True, text=True, timeout=timeout + 8)
+    try:
+        out = subprocess.run(cmd, input=hdr_text, capture_output=True, text=True, timeout=timeout + 8)
+    finally:
+        if tmp_body:
+            try:
+                os.unlink(tmp_body)
+            except OSError:
+                pass
     if out.returncode != 0:
         raise OSError('curl: ' + ((out.stderr or '').strip().splitlines() or ['exit %d' % out.returncode])[-1][:80])
     body, _, status = out.stdout.rpartition('\n' + marker)
@@ -142,7 +161,7 @@ def fetch_via_any_proxy(req, state):
                 last = e
     try:
         headers = dict(req.header_items())
-        return _curl_fetch(req.full_url, headers, 12)
+        return _curl_fetch(req.full_url, headers, 12, body=req.data)
     except urllib.error.HTTPError:
         raise
     except Exception as e:
@@ -220,6 +239,85 @@ def read_claude_credentials():
     return None, kc_err
 
 
+def _keychain_write(raw_json):
+    """把续期后的凭证写回钥匙串，保持 Claude Code 与脚本的一致。失败不致命。"""
+    try:
+        out = subprocess.run(
+            ['security', 'find-generic-password', '-s', 'Claude Code-credentials'],
+            capture_output=True, text=True, timeout=10)
+        m = re.search(r'"acct"<blob>="([^"]*)"', out.stdout or '')
+        if out.returncode != 0 or not m:
+            return False
+        r = subprocess.run(
+            ['security', 'add-generic-password', '-U', '-s', 'Claude Code-credentials',
+             '-a', m.group(1), '-w', raw_json],
+            capture_output=True, text=True, timeout=10)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def refresh_claude_cred(cred, state):
+    """access token 过期时用 refresh token 自动续期（与 Claude Code 自身的续期方式一致），
+    成功后写入缓存并尽量写回钥匙串。返回新凭证，失败返回 None。"""
+    rt = (cred.get('claudeAiOauth') or {}).get('refreshToken')
+    if not rt:
+        return None
+    if now_ms() < state.get('claude_refresh_next_ms', 0):
+        return None
+    state['claude_refresh_next_ms'] = now_ms() + 30 * 60 * 1000  # 失败退避 30 分钟
+    body = json.dumps({'grant_type': 'refresh_token', 'refresh_token': rt,
+                       'client_id': CLAUDE_CLIENT_ID}).encode()
+    req = urllib.request.Request(CLAUDE_TOKEN_URL, data=body, method='POST', headers={
+        'Content-Type': 'application/json',
+        'User-Agent': 'daily-plan-quota-reporter/1.0',
+    })
+    try:
+        data = fetch_via_any_proxy(req, state)
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not data.get('access_token'):
+        return None
+    oauth = dict(cred.get('claudeAiOauth') or {})
+    oauth['accessToken'] = data['access_token']
+    if data.get('refresh_token'):
+        oauth['refreshToken'] = data['refresh_token']
+    if data.get('expires_in'):
+        oauth['expiresAt'] = now_ms() + int(data['expires_in']) * 1000
+    new_cred = dict(cred)
+    new_cred['claudeAiOauth'] = oauth
+    raw = json.dumps(new_cred)
+    try:
+        with open(CRED_CACHE, 'w') as f:
+            f.write(raw)
+        os.chmod(CRED_CACHE, 0o600)
+    except OSError:
+        pass
+    if sys.platform == 'darwin':
+        _keychain_write(raw)
+    state['claude_refresh_next_ms'] = now_ms()  # 成功则清除退避
+    return new_cred
+
+
+def _fetch_claude_windows(token, state):
+    """带令牌请求 usage 接口，解析出 5H/7D 两个窗口。"""
+    req = urllib.request.Request(CLAUDE_USAGE_URL, headers={
+        'Authorization': 'Bearer ' + token,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'User-Agent': 'daily-plan-quota-reporter/1.0',
+    })
+    data = fetch_via_any_proxy(req, state)
+    windows = []
+    for key, label in (('five_hour', '5H'), ('seven_day', '7D')):
+        w = data.get(key)
+        if isinstance(w, dict):
+            used = pct(w.get('utilization'))
+            if used is not None:
+                windows.append({'label': label, 'usedPercent': used,
+                                'resetsAt': iso_to_ms(w.get('resets_at'))})
+    return windows
+
+
 def claude_quota(state):
     tool = {'name': 'CLAUDE CODE'}
     # 后台(cron)调度策略：成功后 5 分钟一查（共享出口 IP 查太频繁会 429）；
@@ -240,22 +338,23 @@ def claude_quota(state):
             return tool
         exp = oauth.get('expiresAt')
         if exp and exp < now_ms():
-            tool['error'] = '凭证已过期：在终端跑一次本脚本；装过启动钩子则用一次 Claude Code 即可'
-            return tool
-        req = urllib.request.Request(CLAUDE_USAGE_URL, headers={
-            'Authorization': 'Bearer ' + token,
-            'anthropic-beta': 'oauth-2025-04-20',
-            'User-Agent': 'daily-plan-quota-reporter/1.0',
-        })
-        data = fetch_via_any_proxy(req, state)
-        windows = []
-        for key, label in (('five_hour', '5H'), ('seven_day', '7D')):
-            w = data.get(key)
-            if isinstance(w, dict):
-                used = pct(w.get('utilization'))
-                if used is not None:
-                    windows.append({'label': label, 'usedPercent': used,
-                                    'resetsAt': iso_to_ms(w.get('resets_at'))})
+            refreshed = refresh_claude_cred(cred, state)
+            if refreshed:
+                oauth = refreshed['claudeAiOauth']
+                token = oauth.get('accessToken')
+            else:
+                tool['error'] = '凭证已过期，自动续期暂未成功，稍后自动重试'
+                return tool
+        try:
+            windows = _fetch_claude_windows(token, state)
+        except urllib.error.HTTPError as e:
+            if e.code != 401:
+                raise
+            # 令牌被提前作废：自动续期后重试一次
+            refreshed = refresh_claude_cred(cred, state)
+            if not refreshed:
+                raise
+            windows = _fetch_claude_windows(refreshed['claudeAiOauth'].get('accessToken'), state)
         if not windows:
             tool['error'] = 'usage 接口返回了无法识别的格式'
         else:
@@ -263,7 +362,7 @@ def claude_quota(state):
             tool['asOf'] = now_ms()
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            tool['error'] = '登录已过期：在 Claude Code 里运行 /login 后自动恢复'
+            tool['error'] = '登录失效且自动续期未成功：在终端 Claude Code 里 /login 一次可恢复'
         elif e.code == 429:
             tool['error'] = '接口限流，已自动退避，稍后恢复'
             state['claude_next_fetch_ms'] = now_ms() + 15 * 60 * 1000
@@ -499,8 +598,11 @@ def main():
     req = urllib.request.Request(SERVER + '/api/quota',
                                  data=json.dumps(payload).encode(),
                                  headers=headers, method='POST')
-    with open_url(req, 15, 'DIRECT') as resp:   # 服务器在国内，固定直连
-        resp.read()
+    try:
+        with open_url(req, 15, 'DIRECT') as resp:   # 服务器在国内，固定直连
+            resp.read()
+    except Exception as e:
+        sys.exit('上报失败（%s）：连不上工作计划服务器，下一分钟自动重试' % type(e).__name__)
     print('已上报：', json.dumps(payload, ensure_ascii=False))
 
 
