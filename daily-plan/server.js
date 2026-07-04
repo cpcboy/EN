@@ -90,6 +90,54 @@ function sanitizeTasks(input) {
   return out;
 }
 
+// ---------------- 额度合并（防呆护栏） ----------------
+const QUOTA_FRESH_MS = 15 * 60 * 1000;
+
+function sanitizeQuotaTool(t) {
+  if (!t || typeof t !== 'object' || typeof t.name !== 'string' || !t.name.trim()) return null;
+  const out = { name: t.name.slice(0, 40) };
+  if (Array.isArray(t.windows)) {
+    const wins = [];
+    for (const w of t.windows.slice(0, 4)) {
+      if (!w || typeof w !== 'object') continue;
+      const used = Number(w.usedPercent);
+      if (!Number.isFinite(used)) continue;
+      wins.push({
+        label: String(w.label || '').slice(0, 4),
+        usedPercent: Math.min(100, Math.max(0, used)),
+        resetsAt: w.resetsAt && Number.isFinite(Number(w.resetsAt)) ? Number(w.resetsAt) : null,
+      });
+    }
+    if (wins.length) out.windows = wins;
+  }
+  if (t.asOf && Number.isFinite(Number(t.asOf))) out.asOf = Number(t.asOf);
+  if (t.error) out.error = String(t.error).slice(0, 160);
+  return out.windows || out.error ? out : null;
+}
+
+const quotaAllZero = (wins) => wins.every((w) => !w.usedPercent);
+
+function mergeQuotaTool(prev, next) {
+  if (!prev || !prev.windows) return next;
+  if (!next.windows) {
+    // 本次只有错误：保留已有数值；15 分钟内还有正常数据就先不显示错误
+    if (!prev.error && prev.asOf && Date.now() - prev.asOf < QUOTA_FRESH_MS) return prev;
+    return { name: prev.name, windows: prev.windows, asOf: prev.asOf, error: next.error };
+  }
+  if (prev.asOf && next.asOf) {
+    if (next.asOf <= prev.asOf) {
+      // 旧数据不覆盖新数据；除非已存的是全 0 占位而本次是真实数值
+      return quotaAllZero(prev.windows) && !quotaAllZero(next.windows) ? next : prev;
+    }
+    // 紧跟在真实数值后面的全 0 记录（<6 小时）多半是会话初始化占位，不采纳
+    if (quotaAllZero(next.windows) && !quotaAllZero(prev.windows)
+        && next.asOf - prev.asOf < 6 * 3600 * 1000) {
+      return prev;
+    }
+  }
+  return next;
+}
+
 // ---------------- HTTP ----------------
 function send(res, status, body, headers) {
   const h = Object.assign({ 'Cache-Control': 'no-store' }, headers);
@@ -134,7 +182,8 @@ function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true, time: new Date().toISOString() });
   }
 
-  // AI 工具额度：Mac 上的 quota-reporter.py 定时 POST，页面 GET 展示
+  // AI 工具额度：Mac 上的 quota-reporter.py 定时 POST，页面 GET 展示。
+  // 合并在服务器端按工具逐个进行（多台电脑上报互不覆盖，异常不清空数据）
   if (url.pathname === '/api/quota') {
     if (req.method === 'GET') {
       return sendJson(res, 200, { quota: db.quota || null });
@@ -148,12 +197,28 @@ function handleApi(req, res, url) {
         } catch (_) {
           return sendJson(res, 400, { error: 'invalid json' });
         }
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          return sendJson(res, 400, { error: 'quota must be an object' });
+        const incoming = parsed && Array.isArray(parsed.tools) ? parsed.tools : null;
+        if (!incoming) return sendJson(res, 400, { error: 'tools must be an array' });
+
+        const stored = db.quota && db.quota.data && Array.isArray(db.quota.data.tools)
+          ? db.quota.data.tools : [];
+        const map = new Map();
+        const order = [];
+        for (const t of stored) {
+          if (t && t.name) { map.set(t.name, t); order.push(t.name); }
         }
-        db.quota = { data: parsed, updatedAt: new Date().toISOString() };
+        for (const rawTool of incoming.slice(0, 8)) {
+          const t = sanitizeQuotaTool(rawTool);
+          if (!t) continue;
+          if (!map.has(t.name)) order.push(t.name);
+          map.set(t.name, mergeQuotaTool(map.get(t.name), t));
+        }
+        db.quota = {
+          data: { tools: order.map((n) => map.get(n)) },
+          updatedAt: new Date().toISOString(),
+        };
         scheduleSave();
-        return sendJson(res, 200, { ok: true });
+        return sendJson(res, 200, { ok: true, quota: db.quota });
       });
     }
     return sendJson(res, 405, { error: 'method not allowed' });

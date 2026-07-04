@@ -25,6 +25,8 @@ import urllib.request
 _args = [a for a in sys.argv[1:] if not a.startswith('--')]
 DEBUG_MODE = '--debug' in sys.argv
 INSTALL_MODE = '--install' in sys.argv
+INSTALL_HOOK_MODE = '--install-hook' in sys.argv
+REFRESH_CRED_MODE = '--refresh-cred' in sys.argv
 SERVER = (_args[0] if _args else os.environ.get('DP_SERVER', '')).rstrip('/')
 ACCESS_CODE = _args[1] if len(_args) > 1 else os.environ.get('DP_ACCESS_CODE', '')
 AGENT_LABEL = 'com.dailyplan.quota-reporter'
@@ -238,7 +240,7 @@ def claude_quota(state):
             return tool
         exp = oauth.get('expiresAt')
         if exp and exp < now_ms():
-            tool['error'] = '凭证已过期：打开一次 Claude Code 后，在终端运行一次本脚本'
+            tool['error'] = '凭证已过期：在终端跑一次本脚本；装过启动钩子则用一次 Claude Code 即可'
             return tool
         req = urllib.request.Request(CLAUDE_USAGE_URL, headers={
             'Authorization': 'Bearer ' + token,
@@ -351,45 +353,48 @@ def codex_quota():
     return tool
 
 
-def merge_previous(tools, headers):
-    """与服务器上已有数据合并：
-    - 本次读取失败/跳过的工具沿用旧数值，避免面板被清空
-    - 多台电脑同时上报时，按 asOf 时间戳「谁的数据新用谁的」
-      （例如 Codex 主要在 MacBook 上用，Mac mini 的旧记录不会覆盖它）"""
+def refresh_cred():
+    """只刷新凭证缓存（供 Claude Code 启动钩子在用户会话内调用）。"""
+    cred, kc_err = read_claude_credentials()
+    oauth = (cred or {}).get('claudeAiOauth') or {}
+    if oauth.get('accessToken'):
+        exp = oauth.get('expiresAt')
+        ok = not exp or exp > now_ms()
+        print('凭证缓存已刷新：token ' + ('有效' if ok else '已过期（Claude Code 使用中会自动续期）'))
+    else:
+        print('未读到凭证' + ('（钥匙串：%s）' % kc_err[:60] if kc_err else ''))
+
+
+def install_hook():
+    """在 ~/.claude/settings.json 注册 SessionStart 钩子：
+    每次使用 Claude Code（终端或桌面版）时自动刷新凭证缓存，
+    后台上报永远拿得到新鲜凭证，不再需要手动跑脚本。"""
+    if sys.platform != 'darwin':
+        sys.exit('--install-hook 仅支持 macOS')
+    import shutil
+    settings_path = os.path.expanduser('~/.claude/settings.json')
+    cmd = '/usr/bin/python3 %s --refresh-cred >/dev/null 2>&1 &' % os.path.expanduser('~/.quota-reporter.py')
+    settings = {}
     try:
-        req = urllib.request.Request(SERVER + '/api/quota', headers=headers)
-        with open_url(req, 10, 'DIRECT') as resp:   # 服务器在国内，固定直连
-            prev = json.load(resp)
-        prev_tools = {}
-        for t in ((((prev or {}).get('quota') or {}).get('data') or {}).get('tools') or []):
-            if isinstance(t, dict) and t.get('name'):
-                prev_tools[t['name']] = t
-    except Exception:
-        return tools
-    merged = []
-    for t in tools:
-        p = prev_tools.get(t.get('name'))
-        if t.get('reuse'):
-            # 本轮跳过查询（限流退避期），原样沿用服务器上的数据
-            t = p if p else {'name': t['name'], 'error': '等待下一次查询'}
-        elif t.get('error') and not t.get('windows'):
-            if p and p.get('windows'):
-                if not p.get('error') and p.get('asOf') and now_ms() - p['asOf'] < 15 * 60 * 1000:
-                    # 另一台机器刚上报过正常数据：忽略本机的读取失败，避免面板闪现错误
-                    t = p
-                else:
-                    t = {'name': t['name'], 'windows': p['windows'],
-                         'asOf': p.get('asOf'), 'error': t['error']}
-        elif t.get('windows') and p and p.get('windows') \
-                and p.get('asOf') and t.get('asOf') and p['asOf'] > t['asOf']:
-            # 另一台电脑上报过更新的数据，保留它——除非对方是全 0（会话
-            # 初始化的占位记录）而本机有真实数值
-            p_zero = all(not w.get('usedPercent') for w in p['windows'])
-            t_zero = all(not w.get('usedPercent') for w in t['windows'])
-            if not (p_zero and not t_zero):
-                t = p
-        merged.append(t)
-    return merged
+        with open(settings_path) as f:
+            settings = json.load(f)
+    except FileNotFoundError:
+        pass
+    except ValueError:
+        sys.exit('~/.claude/settings.json 不是合法 JSON，为安全起见不自动修改，请手动检查')
+    if 'quota-reporter' in json.dumps(settings):
+        print('启动钩子已存在，无需重复安装')
+        return
+    if os.path.exists(settings_path):
+        shutil.copy2(settings_path, settings_path + '.bak-quota')
+    settings.setdefault('hooks', {}).setdefault('SessionStart', []).append(
+        {'hooks': [{'type': 'command', 'command': cmd}]})
+    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+    with open(settings_path, 'w') as f:
+        json.dump(settings, f, indent=2, ensure_ascii=False)
+    print('✅ 已安装 Claude Code 启动钩子：每次使用 Claude Code 自动刷新凭证缓存')
+    if os.path.exists(settings_path + '.bak-quota'):
+        print('   原配置已备份到 ~/.claude/settings.json.bak-quota')
 
 
 def debug_network():
@@ -474,6 +479,10 @@ def install_launch_agent():
 def main():
     if DEBUG_MODE:
         return debug_network()
+    if REFRESH_CRED_MODE:
+        return refresh_cred()
+    if INSTALL_HOOK_MODE:
+        return install_hook()
     if INSTALL_MODE:
         return install_launch_agent()
     if not SERVER:
@@ -482,7 +491,9 @@ def main():
     if ACCESS_CODE:
         headers['X-Access-Code'] = ACCESS_CODE
     state = load_state()
-    tools = merge_previous([claude_quota(state), codex_quota()], headers)
+    # 数据合并在服务器端完成（多机互不覆盖、异常不清空）；
+    # 退避期跳过的工具（reuse）直接不上报，服务器保留原值
+    tools = [t for t in (claude_quota(state), codex_quota()) if not t.get('reuse')]
     save_state(state)
     payload = {'tools': tools, 'reportedAt': now_ms()}
     req = urllib.request.Request(SERVER + '/api/quota',
